@@ -1,6 +1,8 @@
 import typing
 import os, json
 import zipfile
+
+import requests
 from .Items import item_table, item_data_table, BSItem
 from .Locations import location_table, BSLocation
 from .CampainLayout import generate_campain_layout
@@ -91,8 +93,72 @@ class BSWorld(World):
             "campaign_name": self.campaign_name,
             "start_songs": [self.node_to_keystr[0]] + [self.node_to_keystr[i] for i in self.node_connections[0]]
         }
-
+    
     def generate_output(self, output_directory: str):
+        # Generate .bplist playlist format
+        playlist = {
+            "playlistTitle": self.campaign_name,
+            "playlistAuthor": "Archipelago",
+            "image": "",
+            "customData": {
+                "syncURL": "",
+                "unlocked_nodes": [0] + list(self.node_connections[0])  # Start with node 0 and its direct connections
+            },
+            "songs": []
+        }
+        
+        # Count difficulties per levelid
+        difficulty_count = {}
+        for song_keystr, song_data in self.processed_songs.items():
+            levelid = song_data["levelid"]
+            difficulty_count[levelid] = difficulty_count.get(levelid, 0) + 1
+        
+        # Create song list with sorting key
+        songs_by_layer = []
+        for layer in sorted(self.node_layers.keys()):
+            for node_id in self.node_layers[layer]:
+                song_keystr = self.node_to_keystr[node_id]
+                song_data = self.processed_songs[song_keystr]
+                levelid = song_data["levelid"]
+                
+                songs_by_layer.append({
+                    "node_id": node_id,
+                    "song_keystr": song_keystr,
+                    "levelid": levelid,
+                    "difficulty_count": difficulty_count[levelid]
+                })
+        
+        # Sort by difficulty count (ascending or descending)
+        songs_by_layer.sort(key=lambda x: x["difficulty_count"], reverse=False)
+        
+        # Add songs to playlist in sorted order
+        for song in songs_by_layer:
+            levelid = song["levelid"]
+            
+            # Fetch hash and name from BeatSaver API
+            song_hash = levelid
+            song_name = levelid
+            try:
+                response = requests.get(f"https://api.beatsaver.com/maps/id/{levelid}")
+                if response.status_code == 200:
+                    beatsaver_data = response.json()
+                    song_hash = beatsaver_data.get("versions", [{}])[0].get("hash", levelid)
+                    song_name = beatsaver_data.get("metadata", {}).get("songName", levelid)
+            except:
+                pass
+            
+            playlist["songs"].append({
+                "key": levelid,
+                "hash": song_hash,
+                "songName": song_name
+            })
+        
+        # Write playlist file
+        file_path = f"{self.multiworld.get_out_file_name_base(self.player)}.bplist"
+        with open(file_path, "w") as f:
+            json.dump(playlist, f, indent=4)
+        
+
         # Template for info.json
         info_json = {
             "name": self.campaign_name,
