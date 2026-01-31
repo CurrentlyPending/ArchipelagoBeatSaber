@@ -1,11 +1,8 @@
 import typing
-import os, json
-import zipfile
-
+import json
 import requests
 from .Items import item_table, item_data_table, BSItem
 from .Locations import location_table, BSLocation
-from .CampainLayout import generate_campain_layout
 from .Options import BSOptions
 from .Rules import set_rules
 from .Regions import create_regions
@@ -34,209 +31,218 @@ class BSWorld(World):
     item_name_to_id = item_table
     location_name_to_id = location_table
 
-    node_layers: typing.Dict[int, typing.Set[int]]
-    node_connections: typing.Dict[int, typing.Set[int]]
-
-    songshuffle: list
-
-    music_map: typing.Dict[int,int]
-
+    # Only need connections for unlock logic, not layers
+    node_connections: typing.Dict[int, typing.List[int]]
+    
     options_dataclass = BSOptions
 
     campaign_name: str
-    keystr_to_node: typing.Dict[str,int] = {}
-    node_to_keystr: typing.Dict[int,str] = {}
-    processed_songs = {}
+    processed_songs: typing.Dict[str, dict] = {}
+    node_to_song: typing.Dict[int, dict] = {}  # Maps node ID directly to song data
+    sorted_songs: typing.List[dict] = []  # Sorted list of songs by difficulty count
 
     def create_regions(self):
         create_regions(self.multiworld, self.player)
 
     def set_rules(self):
-        set_rules(self.multiworld, self.options, self.player, self.node_connections, self.node_layers)
+        # Simplified rules - you'll need to update Rules.py accordingly
+        set_rules(self.multiworld, self.options, self.player)
 
     def create_item(self, name: str) -> Item:
         return BSItem(name, item_data_table[name].classification, item_data_table[name].code, self.player)
 
     def generate_early(self):
+        """Process songs and set up node connections"""
         self.node_connections = {}
-        self.node_layers = {}
-        generate_campain_layout(self.options, self.multiworld.random, self.node_connections, self.node_layers)
-
+        
+        # First pass: fetch actual difficulty counts from BeatSaver
+        difficulty_count = {}
+        levelids_to_fetch = set()
+        
         for name, data in self.options.songs.items():
-            keystr = data["levelid"] + "_" + data["characteristic"] + "_" + str(data["difficulty"])
-            self.processed_songs[keystr] = data
+            levelid = data["levelid"]
+            levelids_to_fetch.add(levelid)
+        
+        # Fetch difficulty counts from BeatSaver
+        for levelid in levelids_to_fetch:
+            try:
+                response = requests.get(f"https://api.beatsaver.com/maps/id/{levelid}", timeout=5)
+                if response.status_code == 200:
+                    beatsaver_data = response.json()
+                    # Count total difficulties across all characteristics
+                    total_diffs = 0
+                    versions = beatsaver_data.get("versions", [])
+                    if versions:
+                        diffs = versions[0].get("diffs", [])
+                        total_diffs = len(diffs)
+                    difficulty_count[levelid] = total_diffs if total_diffs > 0 else 1
+                    print("Total difficulties for " + levelid + ": " + str(difficulty_count[levelid]))
+                else:
+                    print(f"Warning: Could not fetch difficulty count for {levelid}, defaulting to 1")
+                    difficulty_count[levelid] = 1
+            except Exception as e:
+                print(f"Warning: Error fetching BeatSaver data for {levelid}: {e}, defaulting to 1")
+                difficulty_count[levelid] = 1
+        
+        # Second pass: create song list with correct difficulty counts
+        song_list = []
+        for name, data in self.options.songs.items():
+            levelid = data["levelid"]
+            song_list.append({
+                'name': name,
+                'data': data,
+                'levelid': levelid,
+                'difficulty_count': difficulty_count.get(levelid, 1)
+            })
+        
+        # Sort songs by difficulty count (ascending - easiest/simplest first)
+        song_list.sort(key=lambda x: x['difficulty_count'])
+        
+        # Debug: print the sorted order
+        print("Songs sorted by difficulty count:")
+        for i, song in enumerate(song_list[:self.options.num_tracks]):
+            print(f"  Node {i}: {song['name']} (levelid: {song['levelid']}, {song['difficulty_count']} difficulties)")
+        
+        # Take only the number of tracks we need
+        song_list = song_list[:self.options.num_tracks]
+        
+        # Store sorted songs for later use in generate_basic
+        self.sorted_songs = song_list
+        
+        # Initialize all nodes with empty connections
+        for i in range(self.options.num_tracks):
+            self.node_connections[i] = []
+        
+        # Simple connection structure: each song unlocks the next
+        # Node 0 is always unlocked (root)
+        for i in range(self.options.num_tracks - 1):
+            self.node_connections[i].append(i + 1)
+        
+        # OR: Use your existing campaign layout logic if you want that structure
+        # from .CampainLayout import generate_campain_layout
+        # node_layers = {}
+        # generate_campain_layout(self.options, self.multiworld.random, self.node_connections, node_layers)
 
     def create_items(self):
-        songUnlocks = []
-        for i in range(1,self.options.num_tracks):
-            if not i in list(self.node_connections[0]):
-                songUnlocks.append(self.create_item("Song " + str(i).zfill(2)))
-        #TODO: nice filler items
-        filler = [Item("Nothing", ItemClassification.filler, -1, self.player) for i in range(self.options.num_tracks - len(songUnlocks))]
+        """Create progressive song unlock items"""
+        # Create one progressive item for each track (except node 0 which is free)
+        progressive_items = [
+            self.create_item("Progressive Song Unlock") 
+            for i in range(self.options.num_tracks - 1)  # -1 because node 0 is free
+        ]
+        songUnlocks = progressive_items
+        print(songUnlocks)
+        filler = [Item("Nothing", ItemClassification.filler, -1, self.player) 
+                  for i in range(self.options.num_tracks - len(songUnlocks))]
         self.multiworld.itempool += songUnlocks + filler
+        print(self.multiworld.itempool)
 
     def generate_basic(self):
+        """Map songs to nodes"""
         self.campaign_name = f"AP Campaign, Seed {self.multiworld.seed_name}"
-        self.songshuffle = list(self.processed_songs.keys())
-        self.multiworld.random.shuffle(self.songshuffle)
-        for i in range(self.options.num_tracks):
-            self.keystr_to_node[list(self.processed_songs)[i]] = i
-            self.node_to_keystr[i] = list(self.processed_songs)[i]
+        
+        # Process song data from the pre-sorted list
+        for name, data in self.options.songs.items():
+            levelid = data["levelid"]
+            keystr = f"{levelid}_{data['characteristic']}_{data['difficulty']}"
+            self.processed_songs[keystr] = {
+                **data,
+                'name': name
+            }
+        
+        # Assign songs to nodes in sorted order (already sorted by difficulty count in generate_early)
+        for i, song_info in enumerate(self.sorted_songs):
+            if i >= self.options.num_tracks:
+                break
+            self.node_to_song[i] = {
+                **song_info['data'],
+                'name': song_info['name']
+            }
+        
+        # Lock unused location nodes
         for i in range(self.options.num_tracks, 50):
-            self.multiworld.get_location("Node " + f"{i}".zfill(2), self.player).place_locked_item(Item("Nothing", ItemClassification.filler, -1, self.player))
+            self.multiworld.get_location("Node " + f"{i}".zfill(2), self.player).place_locked_item(
+                Item("Nothing", ItemClassification.filler, -1, self.player))
 
     def fill_slot_data(self):
+        """Send data to the client"""
+        # Build keystr mapping: node_id -> "levelid_characteristic_difficulty"
+        node_to_keystr = {}
+        keystr_to_node = {}
+
+        # Convert node_to_song to a simple format the client can use
+        song_mapping = {}
+        for node_id, song_data in self.node_to_song.items():
+            keystr = f"{song_data['levelid']}_{song_data['characteristic']}_{song_data['difficulty']}"
+            node_to_keystr[node_id] = keystr
+            keystr_to_node[keystr] = node_id
+            song_mapping[node_id] = {
+                'levelid': song_data['levelid'],
+                'characteristic': song_data['characteristic'],
+                'difficulty': song_data['difficulty'],
+                'name': song_data['name']
+            }
+        
         return {
             "DeathLink": self.options.death_link.value,
-            "node_to_keystr": self.node_to_keystr,
-            "keystr_to_node": self.keystr_to_node,
             "campaign_name": self.campaign_name,
-            "start_songs": [self.node_to_keystr[0]] + [self.node_to_keystr[i] for i in self.node_connections[0]]
+            "songs": song_mapping,
+            "node_to_keystr": node_to_keystr,  # {0: "43A2E_Standard_4", 1: "43A5D_Standard_4", ...}
+            "keystr_to_node": keystr_to_node,  # {"43A2E_Standard_4": 0, "43A5D_Standard_4": 1, ...}
+            "start_songs": [node_to_keystr[0]]  # Just the first song (node 0)
         }
     
     def generate_output(self, output_directory: str):
-        # Generate .bplist playlist format
+        """Generate only the .bplist playlist file"""
+        
+        # Build playlist
         playlist = {
             "playlistTitle": self.campaign_name,
             "playlistAuthor": "Archipelago",
             "image": "",
             "customData": {
                 "syncURL": "",
-                "unlocked_nodes": [0] + list(self.node_connections[0])  # Start with node 0 and its direct connections
+                "unlocked_nodes": [0] + list(self.node_connections[0]),  # Initially unlocked nodes
+                "node_connections": self.node_connections  # For client to track progression
             },
             "songs": []
         }
         
-        # Count difficulties per levelid
-        difficulty_count = {}
-        for song_keystr, song_data in self.processed_songs.items():
+        # Add all songs to the playlist
+        # The client will handle showing/hiding based on unlock state
+        for node_id in sorted(self.node_to_song.keys()):
+            song_data = self.node_to_song[node_id]
             levelid = song_data["levelid"]
-            difficulty_count[levelid] = difficulty_count.get(levelid, 0) + 1
-        
-        # Create song list with sorting key
-        songs_by_layer = []
-        for layer in sorted(self.node_layers.keys()):
-            for node_id in self.node_layers[layer]:
-                song_keystr = self.node_to_keystr[node_id]
-                song_data = self.processed_songs[song_keystr]
-                levelid = song_data["levelid"]
-                
-                songs_by_layer.append({
-                    "node_id": node_id,
-                    "song_keystr": song_keystr,
-                    "levelid": levelid,
-                    "difficulty_count": difficulty_count[levelid]
-                })
-        
-        # Sort by difficulty count (ascending or descending)
-        songs_by_layer.sort(key=lambda x: x["difficulty_count"], reverse=False)
-        
-        # Add songs to playlist in sorted order
-        for song in songs_by_layer:
-            levelid = song["levelid"]
             
-            # Fetch hash and name from BeatSaver API
+            # Fetch BeatSaver metadata
             song_hash = levelid
-            song_name = levelid
+            song_name = song_data.get('name', levelid)
+            
             try:
-                response = requests.get(f"https://api.beatsaver.com/maps/id/{levelid}")
+                response = requests.get(f"https://api.beatsaver.com/maps/id/{levelid}", timeout=5)
                 if response.status_code == 200:
                     beatsaver_data = response.json()
                     song_hash = beatsaver_data.get("versions", [{}])[0].get("hash", levelid)
-                    song_name = beatsaver_data.get("metadata", {}).get("songName", levelid)
-            except:
-                pass
+                    api_song_name = beatsaver_data.get("metadata", {}).get("songName")
+                    if api_song_name:
+                        song_name = api_song_name
+            except Exception as e:
+                print(f"Warning: Could not fetch BeatSaver data for {levelid}: {e}")
             
             playlist["songs"].append({
                 "key": levelid,
                 "hash": song_hash,
-                "songName": song_name
+                "songName": song_name,
+                "node_id": node_id,  # Add node ID so client knows which unlock corresponds to which song
+                "difficulties": [{
+                    "characteristic": song_data["characteristic"],
+                    "name": ["Easy", "Normal", "Hard", "Expert", "ExpertPlus"][song_data["difficulty"]]
+                }]
             })
         
         # Write playlist file
         file_path = f"{self.multiworld.get_out_file_name_base(self.player)}.bplist"
         with open(file_path, "w") as f:
-            json.dump(playlist, f, indent=4)
+            json.dump(playlist, f, indent=2)
         
-
-        # Template for info.json
-        info_json = {
-            "name": self.campaign_name,
-            "desc": "Generated on APWorld, version idk",
-            "bigDesc": "TODO dump settings, other players maybe?",
-            "allUnlocked": False,
-            "mapPositions": [ ],
-            "mapHeight": 1200,
-            "backgroundAlpha": 0.9,
-            "lightColor": {
-                "r": 0.0,
-                "g": 0.443137258,
-                "b": 0.9843137
-            }
-        }
-
-        # Nodes
-        nodes_json = {}
-        node_distance_horizontal = 60
-        for layer in range(len(self.node_layers)):
-            layer_width = len(self.node_layers[layer]) * node_distance_horizontal
-            layer_start = -0.5 * layer_width # Center around 0, start from left, increment to right
-            for i in range(len(self.node_layers[layer])):
-                loc_id = self.node_layers[layer][i]
-                # Write meta info to info.json
-                locname = f"Track{loc_id}"
-                node_meta_info = {
-                    "childNodes": self.node_connections[loc_id],
-                    "x":  layer_start + node_distance_horizontal * i,
-                    "y": layer*80,
-                    "scale": 0.9,
-                    "letterPortion": locname,
-                    "numberPortion": -1
-                }
-                info_json["mapPositions"].append(node_meta_info)
-
-                # Write node info
-                node_json = {
-                    "name": locname,
-                    "songid": self.processed_songs[self.node_to_keystr[loc_id]]["levelid"],
-                    "characteristic": self.processed_songs[self.node_to_keystr[loc_id]]["characteristic"],
-                    "difficulty": self.processed_songs[self.node_to_keystr[loc_id]]["difficulty"],
-                    "modifiers": {
-                        "fastNotes": False,
-                        "songSpeed": 0,
-                        "noBombs": False,
-                        "disappearingArrows": False,
-                        "strictAngles": False,
-                        "noObstacles": False,
-                        "batteryEnergy": False,
-                        "failOnSaberClash": False,
-                        "instaFail": False,
-                        "noFail": False,
-                        "noArrows": False,
-                        "ghostNotes": False,
-                        "energyType": 0,
-                        "enabledObstacleType": 0,
-                        "speedMul": 1.0
-                    },
-                    "requirements": [],
-                    "externalModifiers": {},
-                    "challengeInfo": None,
-                    "unlockableItems": [],
-                    "unlockMap": False
-                }
-                nodes_json[self.node_layers[layer][i]] = node_json
-        # Write zipfile
-        folder_prefix = f"AP_{self.multiworld.seed_name}"
-        file_path = f"{self.multiworld.get_out_file_name_base(self.player)}.zip"
-        with zipfile.ZipFile(file_path, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
-            zf.writestr(f"{folder_prefix}/info.json", json.dumps(info_json))
-            def load_data(name: str):
-                import pkgutil
-                data = pkgutil.get_data(__name__, "data/" + name)
-                return data
-            coverimg = load_data("cover.png")
-            #bkgimg = load_data("map background.png")
-            zf.writestr(f"{folder_prefix}/cover.png", coverimg)
-            #zf.writestr(f"{folder_prefix}/map background.png", bkgimg)
-            for i in range(self.options.num_tracks):
-                zf.writestr(f"{folder_prefix}/{i}.json", json.dumps(nodes_json[i]))
+        print(f"Generated playlist: {file_path}")

@@ -1,0 +1,149 @@
+{
+  "playlistTitle": "AP Campaign, Seed 66869842762350628826",
+  "playlistAuthor": "Archipelago",
+  "image": "",
+  "customData": {
+    "syncURL": "",
+    "unlocked_nodes": [
+      0,
+      1
+    ],
+    "node_connections": {
+      "0": [
+        1
+      ],
+      "1": [
+        2
+      ],
+      "2": [
+        3
+      ],
+      "3": [
+        4
+      ],
+      "4": [
+        5
+      ],
+      "5": [
+        6
+      ],
+      "6": [
+        7
+      ],
+      "7": [
+        8
+      ],
+      "8": []
+    }
+  },
+  "songs": [
+    {
+      "key": "1F90",
+      "hash": "2fddb136bda7f9e29b4cb6621d6d8e0f8a43b126",
+      "songName": "Overkill",
+      "node_id": 0,
+      "difficulties": [
+        {
+          "characteristic": "Standard",
+          "name": "ExpertPlus"
+        }
+      ]
+    },
+    {
+      "key": "198F3",
+      "hash": "09246637fa63ac55aa518718fd1eb4b876960480",
+      "songName": "Spider Dance",
+      "node_id": 1,
+      "difficulties": [
+        {
+          "characteristic": "Standard",
+          "name": "ExpertPlus"
+        }
+      ]
+    },
+    {
+      "key": "4C6",
+      "hash": "00e5671e594a6fe621c3605fcc5a0e4466ba6478",
+      "songName": "Uprising",
+      "node_id": 2,
+      "difficulties": [
+        {
+          "characteristic": "Standard",
+          "name": "Expert"
+        }
+      ]
+    },
+    {
+      "key": "43A5D",
+      "hash": "6f3e5a591648dbb927199c6deba7647ac85b341a",
+      "songName": "Through The Screen",
+      "node_id": 3,
+      "difficulties": [
+        {
+          "characteristic": "Standard",
+          "name": "ExpertPlus"
+        }
+      ]
+    },
+    {
+      "key": "43A1F",
+      "hash": "d265d40935983502ad6f05ddeb5417f3e37c2290",
+      "songName": "you",
+      "node_id": 4,
+      "difficulties": [
+        {
+          "characteristic": "Standard",
+          "name": "Hard"
+        }
+      ]
+    },
+    {
+      "key": "43A2E",
+      "hash": "80fd2689ce77bdee4b31d61debf4dc9de764c1aa",
+      "songName": "Ego Death",
+      "node_id": 5,
+      "difficulties": [
+        {
+          "characteristic": "Standard",
+          "name": "ExpertPlus"
+        }
+      ]
+    },
+    {
+      "key": "847B",
+      "hash": "567859c06d0d010987875e2579e08899331f73cc",
+      "songName": "Delightful Introduction",
+      "node_id": 6,
+      "difficulties": [
+        {
+          "characteristic": "Standard",
+          "name": "ExpertPlus"
+        }
+      ]
+    },
+    {
+      "key": "16ABF",
+      "hash": "45f9480a43ddea9ff338bf449ad9ead62f73eb52",
+      "songName": "The Nights",
+      "node_id": 7,
+      "difficulties": [
+        {
+          "characteristic": "Standard",
+          "name": "ExpertPlus"
+        }
+      ]
+    },
+    {
+      "key": "29715",
+      "hash": "6be290e33fd748cd678d4c38f1d59e582a44045f",
+      "songName": "Introduction",
+      "node_id": 8,
+      "difficulties": [
+        {
+          "characteristic": "Standard",
+          "name": "ExpertPlus"
+        }
+      ]
+    }
+  ]
+}
