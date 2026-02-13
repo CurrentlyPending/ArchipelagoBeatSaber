@@ -1,6 +1,9 @@
+import os
 import typing
 import json
 import requests
+
+import worlds
 from .Items import item_table, item_data_table, BSItem
 from .Locations import location_table, BSLocation
 from .Options import BSOptions
@@ -8,6 +11,7 @@ from .Rules import set_rules
 from .Regions import create_regions
 from BaseClasses import Item, ItemClassification, Tutorial
 from ..AutoWorld import World, WebWorld
+from .Container import BeatSaberContainer
 
 class BSWeb(WebWorld):
     tutorials = [Tutorial(
@@ -61,7 +65,16 @@ class BSWorld(World):
         
         for name, data in self.options.songs.items():
             levelid = data["levelid"]
-            levelids_to_fetch.add(levelid)
+            levelid = data["levelid"]
+            is_official = data.get("is_official", False)
+            
+            if not is_official:
+                levelids_to_fetch.add(levelid)
+            else:
+                # For official maps, we can't query BeatSaver
+                # Use a default difficulty count or estimate based on the song
+                # Most official songs have 5 difficulties (Easy, Normal, Hard, Expert, Expert+)
+                difficulty_count[levelid] = 5
         
         # Fetch difficulty counts from BeatSaver
         for levelid in levelids_to_fetch:
@@ -81,8 +94,13 @@ class BSWorld(World):
                     print(f"Warning: Could not fetch difficulty count for {levelid}, defaulting to 1")
                     difficulty_count[levelid] = 1
             except Exception as e:
-                print(f"Warning: Error fetching BeatSaver data for {levelid}: {e}, defaulting to 1")
-                difficulty_count[levelid] = 1
+                print(f"Warning: Error fetching BeatSaver data for {levelid}: {e}")
+                if(is_official):
+                    difficulty_count[levelid] = 5
+                    print("Assuming 5 difficulties for official map " + levelid)
+                else:
+                    print("Defaulting to 1 difficulty for " + levelid)
+                    difficulty_count[levelid] = 1
         
         # Second pass: create song list with correct difficulty counts
         song_list = []
@@ -128,9 +146,13 @@ class BSWorld(World):
         # Create one progressive item for each track (except node 0 which is free)
         progressive_items = [
             self.create_item("Progressive Song Unlock") 
-            for i in range(self.options.num_tracks - 1)  # -1 because node 0 is free
+            for i in range(self.options.num_tracks)  # Create extra items to ensure enough progression items for all nodes
         ]
-        songUnlocks = progressive_items
+        extra_progressive_items = [
+            Item("Progressive Song Unlock", ItemClassification.useful, 3, self.player)
+            for i in range (self.options.num_tracks//2)
+        ]
+        songUnlocks = progressive_items + extra_progressive_items
         print(songUnlocks)
         filler = [Item("Nothing", ItemClassification.filler, -1, self.player) 
                   for i in range(self.options.num_tracks - len(songUnlocks))]
@@ -144,7 +166,16 @@ class BSWorld(World):
         # Process song data from the pre-sorted list
         for name, data in self.options.songs.items():
             levelid = data["levelid"]
-            keystr = f"{levelid}_{data['characteristic']}_{data['difficulty']}"
+            is_official = data.get("is_official", False)
+            
+            # Generate the keystr using the format expected by the client
+            # For official maps: "OST_<levelid>_<characteristic>_<difficulty>"
+            # For custom maps: "<levelid>_<characteristic>_<difficulty>"
+            if is_official:
+                keystr = f"OST_{levelid}_{data['characteristic']}_{data['difficulty']}"
+            else:
+                keystr = f"{levelid}_{data['characteristic']}_{data['difficulty']}"
+            
             self.processed_songs[keystr] = {
                 **data,
                 'name': name
@@ -158,11 +189,14 @@ class BSWorld(World):
                 **song_info['data'],
                 'name': song_info['name']
             }
-        
+        self.multiworld.get_location("Node " + f"{self.options.num_tracks - 1}".zfill(2), self.player).place_locked_item(
+            Item("Victory", ItemClassification.progression_skip_balancing, item_table["Victory"], self.player))
         # Lock unused location nodes
         for i in range(self.options.num_tracks, 50):
             self.multiworld.get_location("Node " + f"{i}".zfill(2), self.player).place_locked_item(
                 Item("Nothing", ItemClassification.filler, -1, self.player))
+            
+        self.multiworld.completion_condition[self.player] = lambda state: state.has("Victory", self.player)
 
     def fill_slot_data(self):
         """Send data to the client"""
@@ -173,7 +207,14 @@ class BSWorld(World):
         # Convert node_to_song to a simple format the client can use
         song_mapping = {}
         for node_id, song_data in self.node_to_song.items():
-            keystr = f"{song_data['levelid']}_{song_data['characteristic']}_{song_data['difficulty']}"
+            is_official = song_data.get('is_official', False)
+            
+            # Generate keystr with OST_ prefix for official maps
+            if is_official:
+                keystr = f"OST_{song_data['levelid']}_{song_data['characteristic']}_{song_data['difficulty']}"
+            else:
+                keystr = f"{song_data['levelid']}_{song_data['characteristic']}_{song_data['difficulty']}"
+            
             node_to_keystr[node_id] = keystr
             keystr_to_node[keystr] = node_id
             song_mapping[node_id] = {
@@ -187,8 +228,8 @@ class BSWorld(World):
             "DeathLink": self.options.death_link.value,
             "campaign_name": self.campaign_name,
             "songs": song_mapping,
-            "node_to_keystr": node_to_keystr,  # {0: "43A2E_Standard_4", 1: "43A5D_Standard_4", ...}
-            "keystr_to_node": keystr_to_node,  # {"43A2E_Standard_4": 0, "43A5D_Standard_4": 1, ...}
+            "node_to_keystr": node_to_keystr,  # {0: "43A2E_Standard_4", 1: "OST_Escape_Standard_4", ...}
+            "keystr_to_node": keystr_to_node,  # {"43A2E_Standard_4": 0, "OST_Escape_Standard_4": 1, ...}
             "start_songs": [node_to_keystr[0]]  # Just the first song (node 0)
         }
     
@@ -241,8 +282,18 @@ class BSWorld(World):
             })
         
         # Write playlist file
-        file_path = f"{self.multiworld.get_out_file_name_base(self.player)}.bplist"
-        with open(file_path, "w") as f:
-            json.dump(playlist, f, indent=2)
-        
-        print(f"Generated playlist: {file_path}")
+
+        _patch_data = {
+            self.campaign_name + ".bplist": json.dumps(playlist, indent=2)
+        }
+
+
+        mod = BeatSaberContainer(
+            patch_data=_patch_data,
+            base_path=self.multiworld.get_out_file_name_base(self.player),
+            output_directory=output_directory,
+            player=self.player,
+            player_name=self.multiworld.player_name[self.player]
+        )
+        mod.write()
+        print(f"Generated playlist: {mod.file_path}")

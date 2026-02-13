@@ -28,5 +28,3 @@ def set_rules(multiworld, options, player):
             lambda state, count=required_count: state.has("Progressive Song Unlock", player, count)
         )
     
-    # Completion condition: have all progressive items (or reach all locations)
-    multiworld.completion_condition[player] = lambda state: state.has("Progressive Song Unlock", player, options.num_tracks - 1)

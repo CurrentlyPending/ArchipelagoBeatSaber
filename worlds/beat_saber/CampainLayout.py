@@ -3,6 +3,7 @@ import typing
 def generate_campain_layout(options, random, node_connections: typing.Dict[int, typing.Set[int]], node_layers: typing.Dict[int, typing.Set[int]]):
     # First, generate the campaign layout
     ## Step 1: Generate layers
+    """
     node_layers[0] = []
     cur_layer = 0
     cur_track = 0
@@ -37,3 +38,5 @@ def generate_campain_layout(options, random, node_connections: typing.Dict[int, 
     for i in range(options.num_tracks):
         if i not in nodes_occupied and i != 0:
             node_connections[0].append(i)
+    """
+    return node_connections, node_layers
