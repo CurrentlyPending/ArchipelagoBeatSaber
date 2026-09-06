@@ -30,7 +30,7 @@ class PlaylistCreator:
         # First pass: fetch actual difficulty counts from BeatSaver
         difficulty_count = {}
         levelids_to_fetch = set()
-        
+        hash_list = {}
         for name, data in world.options.songs.items():
             levelid = str(data["levelid"])
             is_official = data.get("is_official", False)
@@ -53,7 +53,7 @@ class PlaylistCreator:
                     versions = beatsaver_data.get("versions", [])
                     if versions:
                         diffs = versions[0].get("diffs", [])
-                        hash = versions[0].get("hash")
+                        hash_list[levelid] = versions[0].get("hash")
                         total_diffs = len(diffs)
                     difficulty_count[levelid] = total_diffs if total_diffs > 0 else 1
                     print("Total difficulties for " + levelid + ": " + str(difficulty_count[levelid]))
@@ -77,7 +77,7 @@ class PlaylistCreator:
                 'name': name,
                 'data': data,
                 'levelid': levelid,
-                'hash': hash,
+                'hash': hash_list.get(levelid),
                 'difficulty_count': difficulty_count.get(levelid, 1)
             })
         
