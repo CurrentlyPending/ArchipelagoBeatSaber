@@ -37,7 +37,7 @@ class BSWorld(World):
     web = BSWeb()
 
     item_name_to_id = item_table
-    location_name_to_id = Locations.location_name_to_id
+    location_name_to_id = location_name_to_id
 
     # Only need connections for unlock logic, not layers
     node_connections: typing.Dict[int, typing.List[int]]
